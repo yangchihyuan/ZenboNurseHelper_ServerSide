@@ -2,13 +2,16 @@
 #include <mutex>
 
 char read_buffer[1024];
-char debug_buffer[20];
-char frame_buffer[200000];      //frame size is usually 45k, I conservatively set 200k
+//char debug_buffer[20];
+std::unique_ptr<char[]> frame_buffer;
+//char frame_buffer[200000];      //frame size is usually 45k, I conservatively set 200k
 int buffer_length = 0;
 int expected_frame_length = 0;
 
-char *frame_buffer1 = NULL;
-char *frame_buffer2 = NULL;
+//char *frame_buffer1 = NULL;
+//char *frame_buffer2 = NULL;
+std::unique_ptr<char[]> frame_buffer1;
+std::unique_ptr<char[]> frame_buffer2;
 int status_frame_buffer1 = 0;    //Chih-Yuan Yang: The variable is used to let the image process thread start to work.
 int status_frame_buffer2 = 0;
 int frame_buffer1_length = 0;
@@ -32,9 +35,10 @@ class session
 
     void do_read()
     {
+        char* frame_buffer_head = frame_buffer.get();
         auto self(shared_from_this());
         socket_.async_read_some(boost::asio::buffer(read_buffer, 1024), 
-            [this, self](boost::system::error_code ec, std::size_t length) {
+            [this, self,frame_buffer_head](boost::system::error_code ec, std::size_t length) {
                 if( !ec)
                 {
                     //Chih-Yuan Yang: Why do I have the "Begin:" string? Is it sent by the Zenbo robot?
@@ -47,24 +51,26 @@ class session
                     //accumulate data into the buffer
                     if( length > 0 && length + buffer_length <= 200000)
                     {
-                        memcpy(frame_buffer + buffer_length, read_buffer, length);
+                        //memcpy(frame_buffer + buffer_length, read_buffer, length);
+                        std::copy(read_buffer,read_buffer+length,frame_buffer_head + buffer_length);
                     }
                     buffer_length += length;
 
                     if( buffer_length == expected_frame_length && expected_frame_length > 0 )
                     {
                         //check the correctness of the JPEG data
-                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer[30])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[31])) == 0xD8 &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[32])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[33])) == 0xE0 &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[buffer_length-2])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[buffer_length-1])) == 0xD9 )
+                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer_head[30])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[31])) == 0xD8 &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[32])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[33])) == 0xE0 &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-2])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-1])) == 0xD9 )
                         {
                             if( status_frame_buffer1 == 0 )
                             {
 //                                std::cout << "save a frame to buffer 1" << std::endl;
-                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);     //6 is the length of the string "Begin:"
+//                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);     //6 is the length of the string "Begin:"
+                                std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer1.get());
                                 frame_buffer1_length = expected_frame_length-6;
                                 status_frame_buffer1 = 1;
                                 gMutex.unlock();
@@ -72,7 +78,8 @@ class session
                             else
                             {
 //                                std::cout << "save a frame to buffer 2" << std::endl;
-                                memcpy(frame_buffer2, frame_buffer+6, expected_frame_length-6);
+//                                memcpy(frame_buffer2, frame_buffer+6, expected_frame_length-6);
+                                std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer2.get());
                                 frame_buffer2_length = expected_frame_length-6;
                                 status_frame_buffer2 = 1;
                                 gMutex_save_JPEG.unlock();
@@ -86,13 +93,13 @@ class session
                     {
 //                        std::cout << "expected_frame_length " << expected_frame_length << " but actual length " << buffer_length << std::endl;
                         
-                        std::string key_info(frame_buffer+6);
+                        std::string key_info(frame_buffer_head+6);
 //                        std::cout << "key " << key_info << std::endl;
                         bool bHeadOK = false, bEndOK = false, bMiddleAsEnd = false;
-                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer[30])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[31])) == 0xD8 &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[32])) == 0xFF && 
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[33])) == 0xE0)
+                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer_head[30])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[31])) == 0xD8 &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[32])) == 0xFF && 
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[33])) == 0xE0)
                         {
 //                            std::cout << "JPEG signature beginning ok" << std::endl;
                             bHeadOK = true;
@@ -101,8 +108,8 @@ class session
                             std::cout << "JPEG signature beginning failed" << std::endl;
                         }
 
-                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer[buffer_length-2])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[buffer_length-1])) == 0xD9 )
+                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-2])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-1])) == 0xD9 )
                         {
 //                            std::cout << "JPEG signature end ok" << std::endl;
                             bEndOK = true;
@@ -112,8 +119,8 @@ class session
                         }
 
                         //extra check
-                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer[expected_frame_length-2])) == 0xFF &&
-                            static_cast<int>(static_cast<unsigned char>(frame_buffer[expected_frame_length-1])) == 0xD9 )
+                        if( static_cast<int>(static_cast<unsigned char>(frame_buffer_head[expected_frame_length-2])) == 0xFF &&
+                            static_cast<int>(static_cast<unsigned char>(frame_buffer_head[expected_frame_length-1])) == 0xD9 )
                         {
 //                            std::cout << "JPEG signature middle as end" << std::endl;
                             bMiddleAsEnd = true;
@@ -146,8 +153,9 @@ class session
                         {
                             if( status_frame_buffer1 == 0 )
                             {
-                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);
-                                memcpy(frame_buffer, frame_buffer+expected_frame_length, buffer_length - expected_frame_length);
+//                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);
+                                std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer1.get());
+                                //memcpy(frame_buffer_head, frame_buffer_head+expected_frame_length, buffer_length - expected_frame_length);
                                 buffer_length -= expected_frame_length;
                                 frame_buffer1_length = expected_frame_length-6;
                                 status_frame_buffer1 = 1;
@@ -156,8 +164,9 @@ class session
                             }
                             else
                             {
-                                memcpy(frame_buffer2, frame_buffer+6, expected_frame_length-6);
-                                memcpy(frame_buffer, frame_buffer+expected_frame_length, buffer_length - expected_frame_length);
+//                                memcpy(frame_buffer2, frame_buffer+6, expected_frame_length-6);
+                                std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer2.get());
+                                //memcpy(frame_buffer, frame_buffer+expected_frame_length, buffer_length - expected_frame_length);
                                 buffer_length -= expected_frame_length;
                                 frame_buffer2_length = expected_frame_length-6;
                                 status_frame_buffer2 = 1;
@@ -181,11 +190,11 @@ class session
                     //to know the expected length
                     if( buffer_length >= 30 && expected_frame_length == 0)
                     {
-                        std::string key_info(frame_buffer+6);
+                        std::string key_info(frame_buffer_head+6);
                         int key_length = key_info.length();
                         if( key_length == 17 )
                         {
-                            std::string str_JPEG_length(frame_buffer + 6 + key_info.length() + 1);
+                            std::string str_JPEG_length(frame_buffer_head + 6 + key_info.length() + 1);
                             int expected_JPEG_length = 0;
                             try{
                                 expected_JPEG_length = std::stoi(str_JPEG_length);      //sometimes the frame_buffer is corrupted, why?
@@ -228,8 +237,10 @@ class session
 //This is the funciton to be called in a thread.
 void receive_socket(short port_number)
 {
-    frame_buffer1 = new char[100000];
-    frame_buffer2 = new char[100000];
+//    memset(frame_buffer, 0, 200000);   //2024/6/25 Chih-Yuan Yang: It doesn't make sense to memset in the constructor
+    frame_buffer = std::make_unique<char[]>(200000);
+    frame_buffer1 = std::make_unique<char[]>(100000);
+    frame_buffer2 = std::make_unique<char[]>(100000);
 
     try
     {
@@ -241,9 +252,6 @@ void receive_socket(short port_number)
     {
         std::cerr << "Exception: " << e.what() << "\n";
     }
-
-    free(frame_buffer1);
-    free(frame_buffer2);
 }
 
 server::server(boost::asio::io_service &io_service, short port_number)
@@ -252,7 +260,6 @@ server::server(boost::asio::io_service &io_service, short port_number)
           port_number(port_number)
 {
     do_accept();
-    memset(frame_buffer, 0, 200000);
 }
 
 void server::do_accept()

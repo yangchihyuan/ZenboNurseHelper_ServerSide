@@ -25,8 +25,6 @@ class server
 //Chih-Yuan Yang: This function is used by a thread.
 void receive_socket(short port_number);
 
-//Chih-Yuan Yang: This funciton is used by another thread to send message from the Server to the Zenbo robot.
-//Because I do not have sufficient knowledge about the Boost.Asio library, I am not sure whether
-//I can combine the two threads?
-//Maybe it is doable in the future when I know Boost.Asio well.
+//2024/6/25 Chih-Yuan Yang: It is better to use two seperate threads to receive images and send reports
+//because the image socket is unstable and needs to re-connect frequently.
 void report_results(short port_number);

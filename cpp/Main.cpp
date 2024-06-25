@@ -8,7 +8,7 @@ The third processes images.
 #include <thread>       //without this, std::thread is unknown
 
 
-#include "8_openvino.hpp"
+#include "Main.hpp"
 #include "SocketToServer.hpp"
 #include "ProcessImage.hpp"
 #include "utility_directory.hpp"

@@ -19,8 +19,11 @@ using namespace cv;
 
 extern int status_frame_buffer1;
 extern int status_frame_buffer2;
-extern char *frame_buffer1;
-extern char *frame_buffer2;
+//extern char *frame_buffer1;
+//extern char *frame_buffer2;
+extern std::unique_ptr<char[]> frame_buffer1;
+extern std::unique_ptr<char[]> frame_buffer2;
+
 extern int frame_buffer1_length;
 extern int frame_buffer2_length;
 extern std::mutex gMutex;
@@ -38,7 +41,7 @@ void process_save_frame_buffer_as_JPEG_images(bool bSaveTransmittedImage, std::s
     {
         if( status_frame_buffer2 == 1)
         {
-            char *data_ = frame_buffer2;
+            char *data_ = frame_buffer2.get();
             std::string key_info(data_);
             std::string str_JPEG_length(data_+ key_info.length() + 1);
             int JPEG_length = frame_buffer2_length - (key_info.length() + str_JPEG_length.length() + 2 );
@@ -92,7 +95,7 @@ void process_image(std::string pose_model_path,
     {
         if( status_frame_buffer1 == 1)
         {
-            char *data_ = frame_buffer1;
+            char *data_ = frame_buffer1.get();
             int length = frame_buffer1_length;
             string key_info(data_);
             string str_timestamp = key_info.substr(0,13);

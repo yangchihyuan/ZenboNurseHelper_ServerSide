@@ -1,3 +1,6 @@
+#set c++14 std
+set(CMAKE_CXX_STANDARD 14)
+
 find_package(Protobuf REQUIRED)
 find_package(Boost COMPONENTS REQUIRED)
 find_package(OpenCV COMPONENTS highgui REQUIRED)
@@ -13,13 +16,13 @@ set(SOURCES SocketToServer.cpp
             utility_compute.cpp
             utility_string.cpp
             utility_csv.cpp
-            8_openvino.cpp
+            Main.cpp
             human_pose_estimator.cpp
             Pose.cpp
             ${PROTO_SRC}
 )
 
-add_demo(NAME 8_openvino
+add_demo(NAME 9_NurseHelper
          SOURCES ${SOURCES}
          HEADERS ${HEADERS}
          DEPENDENCIES monitors models pipelines
@@ -28,6 +31,7 @@ add_demo(NAME 8_openvino
 
 #enable debug information
 set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")   
+
 
 include_directories(${PROTOBUF_INCLUDE_DIRS})
 get_filename_component(PROTO_HDR_DIRECTORY ${PROTO_HDR} DIRECTORY)

@@ -29,7 +29,7 @@ git clone https://github.com/yangchihyuan/RobotVideoSummary_ServerSide.git
 ```
 
 # Compile
-Run the OpenVINO's build_demos.sh in ~/open_model_zoo/demos to build this project, and an executable file 8_openvino should be created at ~/omz_demos_build/intel64/Release/
+Run the OpenVINO's build_demos.sh in ~/open_model_zoo/demos to build this project, and an executable file 9_NurseHelper should be created at ~/omz_demos_build/intel64/Release/
 Set the permissions as executable for the run_server_side_program.sh in the RobotVideoSummary_ServerSide directory.
 ```
 cd ~/open_model_zoo/demos/RobotVideoSummary_ServerSide/cpp
