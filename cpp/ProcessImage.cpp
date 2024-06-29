@@ -17,16 +17,15 @@
 using namespace human_pose_estimation;
 using namespace cv;
 
-extern int status_frame_buffer1;
+extern bool b_frame_buffer1_unused;
 extern int status_frame_buffer2;
-//extern char *frame_buffer1;
-//extern char *frame_buffer2;
+
 extern std::unique_ptr<char[]> frame_buffer1;
 extern std::unique_ptr<char[]> frame_buffer2;
 
 extern int frame_buffer1_length;
 extern int frame_buffer2_length;
-extern std::mutex gMutex;
+extern std::mutex gMutex_process_image;
 extern std::mutex gMutex_save_JPEG;
 extern std::mutex gMutex_send_results;
 extern char str_results[122880];
@@ -91,9 +90,9 @@ void process_image(std::string pose_model_path,
     if(bSaveTransmittedImage)
         CreateDirectory(raw_images_directory);
 
-    while(true)
+    while(true)  //?? true ?? I should modify here. Chih-Yuan Yang 2024/4/26
     {
-        if( status_frame_buffer1 == 1)
+        if( b_frame_buffer1_unused )
         {
             char *data_ = frame_buffer1.get();
             int length = frame_buffer1_length;
@@ -156,13 +155,13 @@ void process_image(std::string pose_model_path,
 
                 strcpy(str_results, report_data.DebugString().c_str());     //How to transmit a protobuf object?
 
-                status_frame_buffer1 = 0;
+                b_frame_buffer1_unused = false;
                 gMutex_send_results.unlock();
             }
         }
         else
         {
-            gMutex.lock();
+            gMutex_process_image.lock();
         }
     }
 }

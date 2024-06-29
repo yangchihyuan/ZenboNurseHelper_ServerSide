@@ -10,6 +10,7 @@ protobuf_generate_cpp(PROTO_SRC PROTO_HDR ${PROTO_FILE})
 file (GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/*.hpp)
 set(SOURCES SocketToServer.cpp
             ProcessImage.cpp
+            ProcessAudio.cpp
             JPEG.cpp
             utility_directory.cpp
             utility_TimeRecorder.cpp
@@ -22,10 +23,12 @@ set(SOURCES SocketToServer.cpp
             ${PROTO_SRC}
 )
 
+#add_library(portaudio libportaudio.a)    #PortAudio
+
 add_demo(NAME 9_NurseHelper
          SOURCES ${SOURCES}
          HEADERS ${HEADERS}
-         DEPENDENCIES monitors models pipelines
+         DEPENDENCIES monitors models pipelines portaudio
          INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
          )
 

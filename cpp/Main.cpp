@@ -32,8 +32,9 @@ int main(int argc, char* argv[]) {
             return EXIT_SUCCESS;
         }
 
-        std::thread thread_receive_frame(receive_socket, FLAGS_port_number);
-        std::thread thread_report_results(report_results, FLAGS_port_number+1);     //another thread to send back results.
+        std::thread thread_receive_frame(receive_image, FLAGS_port_number);
+        std::thread thread_report_results(report_image_results, FLAGS_port_number+1);
+        std::thread thread_receive_audio(receive_audio, FLAGS_port_number+2);
         std::thread thread_image_process(process_image, 
             FLAGS_pose_model, 
             FLAGS_ShowRenderedImage, 
@@ -43,6 +44,7 @@ int main(int argc, char* argv[]) {
 
         thread_receive_frame.join();
         thread_report_results.join();
+        thread_receive_audio.join();
         thread_image_process.join();
     }
     catch (const std::exception& error) {

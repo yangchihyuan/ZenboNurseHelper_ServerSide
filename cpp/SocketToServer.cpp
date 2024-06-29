@@ -1,48 +1,58 @@
 #include "SocketToServer.hpp"
+#include "ProcessAudio.hpp"
 #include <mutex>
+#include <memory>
+#include <queue>
 
-char read_buffer[1024];
-//char debug_buffer[20];
-std::unique_ptr<char[]> frame_buffer;
-//char frame_buffer[200000];      //frame size is usually 45k, I conservatively set 200k
+char read_buffer_image[1024];
+std::unique_ptr<char[]> frame_buffer;     //frame_buffer saves received socket data
 int buffer_length = 0;
 int expected_frame_length = 0;
 
-//char *frame_buffer1 = NULL;
-//char *frame_buffer2 = NULL;
-std::unique_ptr<char[]> frame_buffer1;
-std::unique_ptr<char[]> frame_buffer2;
-int status_frame_buffer1 = 0;    //Chih-Yuan Yang: The variable is used to let the image process thread start to work.
+char read_buffer_audio[1024];
+
+std::unique_ptr<char[]> frame_buffer1;    //frame_buffer1 is used for human pose estimation
+std::unique_ptr<char[]> frame_buffer2;    //frame_buffer2 is used for save JPEG images
+bool b_frame_buffer1_unused;    //Indicate whether frame_buffer1 is unused.
 int status_frame_buffer2 = 0;
 int frame_buffer1_length = 0;
 int frame_buffer2_length = 0;
 
 char str_results[122880];       //Chih-Yuan: Is it good practice to declare a large variable?
 
-std::mutex gMutex;
+std::mutex gMutex_process_image;
 std::mutex gMutex_save_JPEG;
 std::mutex gMutex_send_results;
 
-class session
-    : public std::enable_shared_from_this<session>
+std::condition_variable cv_Socket;
+std::mutex gMutex_receive_audio_package;
+extern std::queue<float> AudioBuffer;    //this is not thread-safe
+extern std::mutex gMutex_FeedPortAudio;
+
+class session_receive_image
+    : public std::enable_shared_from_this<session_receive_image>
 {
   public:
-
-    session(tcp::socket socket)
+    session_receive_image(tcp::socket socket)
         : socket_(std::move(socket))
     {
+    }
+
+    void start()
+    {
+        do_read();
     }
 
     void do_read()
     {
         char* frame_buffer_head = frame_buffer.get();
         auto self(shared_from_this());
-        socket_.async_read_some(boost::asio::buffer(read_buffer, 1024), 
+        socket_.async_read_some(boost::asio::buffer(read_buffer_image, 1024), 
             [this, self,frame_buffer_head](boost::system::error_code ec, std::size_t length) {
                 if( !ec)
                 {
                     //Chih-Yuan Yang: Why do I have the "Begin:" string? Is it sent by the Zenbo robot?
-                    if( strncmp(read_buffer, "Begin:", 6 ) == 0 )
+                    if( strncmp(read_buffer_image, "Begin:", 6 ) == 0 )
                     {
                         buffer_length = 0;
                         expected_frame_length = 0;
@@ -51,8 +61,8 @@ class session
                     //accumulate data into the buffer
                     if( length > 0 && length + buffer_length <= 200000)
                     {
-                        //memcpy(frame_buffer + buffer_length, read_buffer, length);
-                        std::copy(read_buffer,read_buffer+length,frame_buffer_head + buffer_length);
+                        //memcpy(frame_buffer + buffer_length, read_buffer_image, length);
+                        std::copy(read_buffer_image,read_buffer_image+length,frame_buffer_head + buffer_length);
                     }
                     buffer_length += length;
 
@@ -66,19 +76,15 @@ class session
                             static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-2])) == 0xFF &&
                             static_cast<int>(static_cast<unsigned char>(frame_buffer_head[buffer_length-1])) == 0xD9 )
                         {
-                            if( status_frame_buffer1 == 0 )
+                            if( b_frame_buffer1_unused == false)
                             {
-//                                std::cout << "save a frame to buffer 1" << std::endl;
-//                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);     //6 is the length of the string "Begin:"
                                 std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer1.get());
                                 frame_buffer1_length = expected_frame_length-6;
-                                status_frame_buffer1 = 1;
-                                gMutex.unlock();
+                                b_frame_buffer1_unused = true;
+                                gMutex_process_image.unlock();
                             }
                             else
                             {
-//                                std::cout << "save a frame to buffer 2" << std::endl;
-//                                memcpy(frame_buffer2, frame_buffer+6, expected_frame_length-6);
                                 std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer2.get());
                                 frame_buffer2_length = expected_frame_length-6;
                                 status_frame_buffer2 = 1;
@@ -132,12 +138,12 @@ class session
                         if( bHeadOK && bEndOK )
                         {
                             std::cout << "suspicious case" << std::endl;
-/*                            if( status_frame_buffer1 == 0 )
+/*                            if( b_frame_buffer1_unused == false )
                             {
                                 memcpy(frame_buffer1, frame_buffer+6, buffer_length-6);     //6 is the length of the string "Begin:"
                                 frame_buffer1_length = buffer_length-6;
-                                status_frame_buffer1 = 1;
-                                gMutex.unlock();
+                                b_frame_buffer1_unused = true;
+                                gMutex_process_image.unlock();
                             }
                             else
                             {
@@ -151,15 +157,15 @@ class session
                         //this is the normal case
                         else if( bHeadOK && bMiddleAsEnd )
                         {
-                            if( status_frame_buffer1 == 0 )
+                            if( b_frame_buffer1_unused == false )
                             {
 //                                memcpy(frame_buffer1, frame_buffer+6, expected_frame_length-6);
                                 std::copy(frame_buffer_head+6, frame_buffer_head+expected_frame_length-6,frame_buffer1.get());
                                 //memcpy(frame_buffer_head, frame_buffer_head+expected_frame_length, buffer_length - expected_frame_length);
                                 buffer_length -= expected_frame_length;
                                 frame_buffer1_length = expected_frame_length-6;
-                                status_frame_buffer1 = 1;
-                                gMutex.unlock();
+                                b_frame_buffer1_unused = true;
+                                gMutex_process_image.unlock();
                                 expected_frame_length = 0;  //set to 0, to recompute the expected length again.
                             }
                             else
@@ -235,9 +241,8 @@ class session
 };
 
 //This is the funciton to be called in a thread.
-void receive_socket(short port_number)
+void receive_image(short port_number)
 {
-//    memset(frame_buffer, 0, 200000);   //2024/6/25 Chih-Yuan Yang: It doesn't make sense to memset in the constructor
     frame_buffer = std::make_unique<char[]>(200000);
     frame_buffer1 = std::make_unique<char[]>(100000);
     frame_buffer2 = std::make_unique<char[]>(100000);
@@ -246,6 +251,7 @@ void receive_socket(short port_number)
     {
         boost::asio::io_service io_service;
         server s(io_service, port_number);
+        s.do_accept<session_receive_image>();
         io_service.run();
     }
     catch (std::exception &e)
@@ -259,10 +265,9 @@ server::server(boost::asio::io_service &io_service, short port_number)
           socket_(io_service),
           port_number(port_number)
 {
-    do_accept();
 }
 
-void server::do_accept()
+template <typename T> void server::do_accept()
 {
     std::cout << "wait for connection " << port_number << "\n";
     acceptor_.async_accept(socket_,
@@ -270,10 +275,10 @@ void server::do_accept()
                                 if (!ec)
                                 {
                                     std::cout << "port " << port_number << " connection accepted" << "\n";
-                                    std::make_shared<session>(std::move(socket_))->do_read();
+                                    std::make_shared<T>(std::move(socket_))->start();
                                 }
 
-                                do_accept();
+                                do_accept<T>();
                             });
 }
 
@@ -323,56 +328,85 @@ class session_report_result
     tcp::socket socket_;
 };
 
-class server_report_results
-{
-  public:
-    server_report_results(boost::asio::io_service &io_service, short port_number)
-        : acceptor_(io_service, tcp::endpoint(tcp::v4(), port_number)),
-          socket_(io_service),
-          port_number(port_number)
-    {
-        do_accept();
-    }
-
-  private:
-    void do_accept()
-    {
-        std::cout << "wait for connection " << port_number << "\n";
-        acceptor_.async_accept(socket_,
-                                [this](boost::system::error_code ec) {
-                                    if (!ec)
-                                    {
-                                        std::cout << "port " << port_number << " connection accepted" << "\n";
-                                        std::make_shared<session_report_result>(std::move(socket_))->start();
-                                    }
-
-                                    do_accept();
-                                });
-    }
-
-    tcp::acceptor acceptor_;
-    tcp::socket socket_;
-    short port_number;
-};
-
 //Chih-Yuan Yang: The function is used by a thread to send messages back to the Zenbo robot.
-void report_results(short port_number)
+void report_image_results(short port_number)
 {
     //initialize str_results
     memset(str_results, 0, 1);
     gMutex_send_results.lock();
 
-    
     try
     {
         boost::asio::io_service io_service;
-        server_report_results s(io_service, port_number);
-
+        server s(io_service, port_number);
+        s.do_accept<session_report_result>();
         io_service.run();
     }
     catch (std::exception &e)
     {
         std::cerr << "Exception: " << e.what() << "\n";
     }
+}
 
+extern std::shared_ptr<std::queue<float>> pqueue;
+class session_receive_audio
+    : public std::enable_shared_from_this<session_receive_audio>
+{
+  public:
+    session_receive_audio(tcp::socket socket)
+        : socket_(std::move(socket))
+    {
+    }
+
+    void start()
+    {
+        do_read();
+    }
+
+    void do_read()
+    {
+        auto self(shared_from_this());
+        socket_.async_read_some(boost::asio::buffer(read_buffer_audio, 1024), 
+            [this, self](boost::system::error_code ec, std::size_t length) {
+                if( !ec)
+                {
+                    //char --> short --> float
+                    for( int i = 0; i<length ; i+=2)
+                    {
+                        short value = *(read_buffer_audio + i)<<8 | *(read_buffer_audio+i+1);
+                        float fvalue = static_cast<float>(value) / 32767.0;
+                        AudioBuffer.push(fvalue);
+                    }
+                    if( AudioBuffer.size() > 128 )
+                    {
+                        gMutex_FeedPortAudio.unlock();
+                        gMutex_receive_audio_package.lock();
+                    }
+
+                    do_read();
+                }
+                else{
+                    std::cout << "error_code " << ec.message() << std::endl;
+                }
+            });
+    }
+
+    private:
+    tcp::socket socket_;
+};
+
+void receive_audio(short port_number)
+{
+    PortAudio_initialize();   
+    try
+    {
+        boost::asio::io_service io_service;
+        server s(io_service, port_number);
+        s.do_accept<session_receive_audio>();
+        io_service.run();
+    }
+    catch (std::exception &e)
+    {
+        std::cerr << "Exception: " << e.what() << "\n";
+    }
 }
