@@ -5,9 +5,10 @@
 #include <condition_variable>
 #include <queue>
 
+std::mutex gMutex_audio_buffer;
 std::queue<float> AudioBuffer;
-std::mutex gMutex_FeedPortAudio;
-extern std::mutex gMutex_receive_audio_package;
+std::mutex Mutex_enough_buffer;
+std::condition_variable cond_var;
 PaStream *stream;
 
 static int patestCallback( const void *inputBuffer, void *outputBuffer,
@@ -24,12 +25,13 @@ static int patestCallback( const void *inputBuffer, void *outputBuffer,
     (void) statusFlags;
     (void) inputBuffer;
 
+    std::unique_lock<std::mutex> lock(Mutex_enough_buffer);
     if( data->size() < framesPerBuffer * 2)
     {
-        gMutex_receive_audio_package.unlock();
-        gMutex_FeedPortAudio.lock();
+        cond_var.wait(lock);
     }
 
+    gMutex_audio_buffer.lock();
     for( i=0; i<framesPerBuffer; i++ )
     {
         *out++ = data->front();  /* left */
@@ -38,6 +40,7 @@ static int patestCallback( const void *inputBuffer, void *outputBuffer,
         *out++ = data->front();  /* right */
         data->pop();
     }
+    gMutex_audio_buffer.unlock();
 
     return paContinue;
 }

@@ -24,10 +24,10 @@ std::mutex gMutex_process_image;
 std::mutex gMutex_save_JPEG;
 std::mutex gMutex_send_results;
 
-std::condition_variable cv_Socket;
-std::mutex gMutex_receive_audio_package;
+extern std::mutex gMutex_audio_buffer;
 extern std::queue<float> AudioBuffer;    //this is not thread-safe
 extern std::mutex gMutex_FeedPortAudio;
+extern std::condition_variable cond_var;
 
 class session_receive_image
     : public std::enable_shared_from_this<session_receive_image>
@@ -371,18 +371,18 @@ class session_receive_audio
                 if( !ec)
                 {
                     //char --> short --> float
+                    gMutex_audio_buffer.lock();
                     for( int i = 0; i<length ; i+=2)
                     {
                         short value = *(read_buffer_audio + i)<<8 | *(read_buffer_audio+i+1);
                         float fvalue = static_cast<float>(value) / 32767.0;
                         AudioBuffer.push(fvalue);
                     }
-                    if( AudioBuffer.size() > 128 )
-                    {
-                        gMutex_FeedPortAudio.unlock();
-                        gMutex_receive_audio_package.lock();
-                    }
+                    gMutex_audio_buffer.unlock();
 
+                    if( AudioBuffer.size() >= 128)
+                        cond_var.notify_one();
+                        
                     do_read();
                 }
                 else{
@@ -397,7 +397,7 @@ class session_receive_audio
 
 void receive_audio(short port_number)
 {
-    PortAudio_initialize();   
+    PortAudio_initialize();
     try
     {
         boost::asio::io_service io_service;

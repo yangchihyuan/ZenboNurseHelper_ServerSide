@@ -15,6 +15,9 @@ The third processes images.
 #include "utility_string.hpp"
 #include "utility_csv.hpp"
 
+#include "mainwindow.h"
+
+#include <QApplication>
 
 bool ParseAndCheckCommandLine(int argc, char* argv[]) {
     // ---------------------------Parsing and validation of input args--------------------------------------
@@ -41,6 +44,11 @@ int main(int argc, char* argv[]) {
             FLAGS_SaveTransmittedImage, 
             FLAGS_save_to_directory//,
         );
+
+        QApplication a(argc, argv);
+        MainWindow w;
+        w.show();
+        a.exec();
 
         thread_receive_frame.join();
         thread_report_results.join();
